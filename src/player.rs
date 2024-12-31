@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use bevy::sprite::Anchor;
 
 use crate::prelude::*;
@@ -358,11 +359,15 @@ pub fn tool_system(
     }
 }
 
-pub fn update_player_sprite(mut query: Query<(&mut Transform, &Actor), With<Player>>) {
+pub fn update_player_sprite(
+    mut query: Query<(&mut Transform, &Actor), With<Player>>,
+    mut trail: ResMut<Trail>
+) {
     let (mut transform, actor) = query.single_mut();
     let top_corner_vec = vec3(actor.pos.x as f32, -actor.pos.y as f32, 2.);
     let center_vec = top_corner_vec + vec3(actor.width as f32 / 2., -8., 0.);
     transform.translation = center_vec;
+    trail.points.push_back(transform.translation.truncate());
 }
 
 #[derive(Resource, Default)]
@@ -426,6 +431,13 @@ pub struct Inputs {
 
     numbers: [bool; 4],
 }
+#[derive(Resource, Default)]
+struct Trail {
+    points: VecDeque<Vec2>,
+    normal_color: Color,
+    current_color: Color,
+}
+
 
 pub struct PlayerPlugin;
 impl Plugin for PlayerPlugin {
@@ -435,6 +447,7 @@ impl Plugin for PlayerPlugin {
             (
                 update_player.before(update_actors),
                 update_player_sprite.after(update_actors),
+                trajectory_system.after(update_actors),
                 tool_system
                     .before(chunk_manager_update)
                     .before(update_particles),
@@ -445,6 +458,48 @@ impl Plugin for PlayerPlugin {
         .add_systems(PreUpdate, get_input.run_if(in_state(GameState::Game)))
         .init_resource::<SavingTask>()
         .init_resource::<Inputs>()
+        .init_resource::<Trail>()
         .add_systems(OnEnter(GameState::Game), player_setup.after(manager_setup));
+    }
+}
+fn trajectory_system(
+    mut trail: ResMut<Trail>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut commands: Commands,
+){
+    // 限制轨迹数量，如果超过30条，移除前面的一些（这里简单移除前面的一条）
+    if trail.points.len() > 30 {
+        trail.points.pop_front();
+    }
+
+    // 绘制轨迹（这里简单用线段来表示轨迹，你可以优化绘制效果等）
+    let mut points = Vec::new();
+    for (i, point) in trail.points.iter().enumerate() {
+        if i > 0 {
+            points.push([point.x, point.y, 0.]);
+            points.push([trail.points[i - 1].x, trail.points[i - 1].y, 0.]);
+        }
+    }
+
+    if!points.is_empty() {
+        let mesh = meshes.add(Mesh::from(Circle { radius: 2.0 }));
+        commands.spawn(PbrBundle {
+            mesh: mesh.into(),
+            material: materials.add(StandardMaterial::from(trail.current_color)),
+           ..default()
+        });
+    }
+}
+
+fn handle_keyboard_input(
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    mut trail: ResMut<Trail>,
+) {
+    if keyboard_input.pressed(KeyCode::Space) {
+        trail.current_color = Color::RED;
+    }
+    if keyboard_input.just_released(KeyCode::Space) {
+        trail.current_color = trail.normal_color;
     }
 }
