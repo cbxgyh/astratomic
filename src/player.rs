@@ -1,3 +1,5 @@
+use bevy::render::mesh::{PrimitiveTopology, VertexAttributeValues};
+use bevy::render::render_asset::RenderAssetUsages;
 use bevy::sprite::Anchor;
 
 use crate::prelude::*;
@@ -46,6 +48,7 @@ pub fn player_setup(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     mut texture_atlases: ResMut<Assets<TextureAtlasLayout>>,
+    mut meshes: ResMut<Assets<Mesh>>
 ) {
     let pos: IVec2;
     if let Ok(file) = File::open("assets/world/player") {
@@ -117,8 +120,32 @@ pub fn player_setup(
             ),
         ))
         .add_child(tool_ent);
-}
+    // 创建一个新的 Mesh Rectangle::default()
+    let mut mesh = Mesh::new(PrimitiveTopology::LineList,RenderAssetUsages::RENDER_WORLD);
+    let vertices = vec![
+        // 顶点位置
+        Vec3::new(-0.5, 0.0, 0.0), // 起点
+        Vec3::new(0.5, 0.0, 0.0),  // 终点
+        // 可以添加其他顶点以在线段上创建点
+    ];
 
+    let indices = vec![0, 1];
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, VertexAttributeValues::from(vertices));
+    mesh.insert_indices(bevy::render::mesh::Indices::U32(indices));
+
+    // 添加网格到场景
+    commands.spawn(PbrBundle {
+        mesh: meshes.add(mesh),
+        ..Default::default()
+    })
+    .insert(PlayerTrail { positions: Vec::new() });
+    ;
+
+}
+#[derive(Component)]
+struct PlayerTrail {
+    positions: Vec<Vec3>,
+}
 /// Updates player
 pub fn update_player(
     input: (Res<Inputs>, EventReader<MouseWheel>),
@@ -363,6 +390,11 @@ pub fn update_player_sprite(mut query: Query<(&mut Transform, &Actor), With<Play
     let top_corner_vec = vec3(actor.pos.x as f32, -actor.pos.y as f32, 2.);
     let center_vec = top_corner_vec + vec3(actor.width as f32 / 2., -8., 0.);
     transform.translation = center_vec;
+    // Trail {
+    //     position: transform.translation.xy(),
+    //     lifespan: 0.0, // 初始生存时间
+    //     max_lifespan: 5.0, // 设置最大生存时间
+    // };
 }
 
 #[derive(Resource, Default)]
@@ -426,6 +458,12 @@ pub struct Inputs {
 
     numbers: [bool; 4],
 }
+
+// struct Trail {
+//     position: Vec2,
+//     lifespan: f32,       // 轨迹的生存时间
+//     max_lifespan: f32,   // 最大生存时间
+// }
 
 pub struct PlayerPlugin;
 impl Plugin for PlayerPlugin {

@@ -1,6 +1,8 @@
 #![allow(clippy::type_complexity)]
 
 use bevy::prelude::*;
+use bevy::render::RenderPlugin;
+use bevy::render::settings::{Backends, WgpuSettings};
 
 mod actors;
 mod animation;
@@ -61,7 +63,19 @@ fn main() {
     let mut app = App::new();
 
     app.init_state::<GameState>()
-        .add_plugins(DefaultPlugins.set(ImagePlugin::default_nearest()))
+        .add_plugins(
+            DefaultPlugins.set(RenderPlugin {
+                render_creation: WgpuSettings {
+                    backends: Some(Backends::VULKAN),
+                    ..default()
+                }
+                    .into(),
+                ..default()
+            })
+                .set(ImagePlugin::default_nearest())
+            ,
+
+        )
         //local plugins
         .add_plugins((
             ChunkManagerPlugin,
