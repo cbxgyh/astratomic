@@ -1,8 +1,4 @@
-use std::collections::VecDeque;
-use bevy::render::mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
-use bevy::render::render_asset::RenderAssetUsages;
-use bevy::render::render_resource::VertexFormat;
-use bevy::sprite::{Anchor, MaterialMesh2dBundle, Mesh2dHandle};
+use bevy::sprite::Anchor;
 
 use crate::prelude::*;
 

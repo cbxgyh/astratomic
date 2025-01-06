@@ -8,11 +8,11 @@ fn new_frame() {
     puffin::GlobalProfiler::lock().new_frame();
 }
 
-fn egui(mut egui_ctx: Query<&mut EguiContext, With<PrimaryWindow>>) {
-    let Ok(mut ctx) = egui_ctx.get_single_mut() else {
+fn egui(mut egui_ctx: Query<&EguiContext, With<PrimaryWindow>>) {
+    let Ok(mut ctx) = egui_ctx.get_single() else {
         return;
     };
-    puffin_egui::profiler_window(ctx.get_mut());
+    puffin_egui::profiler_window(ctx.get());
 }
 
 pub struct PuffinPlugin;
