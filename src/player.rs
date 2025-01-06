@@ -1,4 +1,7 @@
-use bevy::sprite::Anchor;
+use std::collections::VecDeque;
+use bevy::render::mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
+use bevy::render::render_asset::RenderAssetUsages;
+use bevy::sprite::{Anchor, MaterialMesh2dBundle, Mesh2dHandle};
 
 use crate::prelude::*;
 
@@ -94,13 +97,7 @@ pub fn player_setup(
         .id();
     let tool_ent = commands
         .spawn(tool_bundle)
-        .insert( TrailedEntity)
-        .insert(  MovementTrail {
-            points: VecDeque::new(),
-            max_length: 100,      // 设定轨迹线最大长度
-            fade_speed: 0.05,    // 设定淡出速度
-            color: Color::WHITE, // 设定轨迹线颜色
-        },)
+
         .insert(Tool)
         .insert_children(0, &[tool_front_ent])
         .id();
@@ -109,6 +106,13 @@ pub fn player_setup(
         .spawn((
             player_actor.clone(),
             Player::default(),
+            TrailedEntity,
+              MovementTrail {
+                   points: VecDeque::new(),
+                   max_length: 100,      // 设定轨迹线最大长度
+                   fade_speed: 0.05,    // 设定淡出速度
+                   color: Color::WHITE, // 设定轨迹线颜色
+               },
             SpriteSheetBundle {
                 atlas,
                 global_transform: player_transform,
@@ -494,7 +498,7 @@ struct TrailMesh {
 fn create_trail_mesh(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-) -> Handle<Mesh> {
+) {
     let mut trail_mesh = TrailMesh {
         mesh: Mesh::new(PrimitiveTopology::TriangleList,RenderAssetUsages::RENDER_WORLD),
         vertex_buffer: Vec::new(),
@@ -505,7 +509,6 @@ fn create_trail_mesh(
     // 创建一个初始的空网格资源，并将其插入到资源管理系统中
     let mesh_handle = meshes.add(trail_mesh.mesh.clone());
     commands.insert_resource(trail_mesh);
-    mesh_handle
 }
 fn update_trail_mesh(
     mut trail_mesh: ResMut<TrailMesh>,
@@ -537,9 +540,9 @@ fn update_trail_mesh(
     mesh.insert_indices(Indices::U32(trail_mesh.index_buffer.clone()));
     mesh.insert_attribute(
         Mesh::ATTRIBUTE_POSITION,
-        trail_mesh.vertex_buffer.as_slice(),
+        trail_mesh.vertex_buffer.clone(),
     );
-    *trail_mesh.mesh = mesh;
+    trail_mesh.mesh = mesh;
 }
 
 fn draw_trails(
@@ -609,6 +612,9 @@ impl Plugin for PlayerPlugin {
             (
                 update_player.before(update_actors),
                 update_player_sprite.after(update_actors),
+                create_trail_mesh.after(update_player_sprite),
+                update_trail_mesh.after(create_trail_mesh),
+                draw_trails.after(update_trail_mesh),
                 tool_system
                     .before(chunk_manager_update)
                     .before(update_particles),
