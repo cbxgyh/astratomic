@@ -1,6 +1,8 @@
-use bevy::render::mesh::{PrimitiveTopology, VertexAttributeValues};
+use std::collections::VecDeque;
+use bevy::render::mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
 use bevy::render::render_asset::RenderAssetUsages;
-use bevy::sprite::Anchor;
+use bevy::render::render_resource::VertexFormat;
+use bevy::sprite::{Anchor, MaterialMesh2dBundle, Mesh2dHandle};
 
 use crate::prelude::*;
 
@@ -96,6 +98,13 @@ pub fn player_setup(
         .id();
     let tool_ent = commands
         .spawn(tool_bundle)
+        .insert( TrailedEntity)
+        .insert(  MovementTrail {
+            points: VecDeque::new(),
+            max_length: 100,      // 设定轨迹线最大长度
+            fade_speed: 0.05,    // 设定淡出速度
+            color: Color::WHITE, // 设定轨迹线颜色
+        },)
         .insert(Tool)
         .insert_children(0, &[tool_front_ent])
         .id();
@@ -385,16 +394,20 @@ pub fn tool_system(
     }
 }
 
-pub fn update_player_sprite(mut query: Query<(&mut Transform, &Actor), With<Player>>) {
-    let (mut transform, actor) = query.single_mut();
+pub fn update_player_sprite(mut query: Query<(&mut Transform, &Actor,&mut MovementTrail), With<Player>>
+) {
+    let (mut transform, actor,mut trail) = query.single_mut();
     let top_corner_vec = vec3(actor.pos.x as f32, -actor.pos.y as f32, 2.);
     let center_vec = top_corner_vec + vec3(actor.width as f32 / 2., -8., 0.);
     transform.translation = center_vec;
-    // Trail {
-    //     position: transform.translation.xy(),
-    //     lifespan: 0.0, // 初始生存时间
-    //     max_lifespan: 5.0, // 设置最大生存时间
-    // };
+    // 将当前位置添加到轨迹中
+    trail.points.push_back(transform.translation);
+
+    // 如果轨迹长度超过最大长度，移除最早的点
+    if trail.points.len() > trail.max_length {
+        let drain_count = trail.points.len() - trail.max_length;
+        trail.points.drain(0..drain_count);
+    }
 }
 
 #[derive(Resource, Default)]
@@ -459,12 +472,139 @@ pub struct Inputs {
     numbers: [bool; 4],
 }
 
-// struct Trail {
-//     position: Vec2,
-//     lifespan: f32,       // 轨迹的生存时间
-//     max_lifespan: f32,   // 最大生存时间
-// }
+// 定义一个组件来存储实体的移动轨迹相关信息
+#[derive(Component)]
+struct MovementTrail {
+    points: VecDeque<Vec3>, // 存储轨迹点的双端队列
+    max_length: usize,     // 轨迹线的最大长度
+    fade_speed: f32,       // 轨迹线淡出的速度
+    color: Color,          // 轨迹线的颜色
+}
 
+// 定义一个组件用于标记需要绘制轨迹的实体
+#[derive(Component)]
+struct TrailedEntity;
+
+// 定义一个结构体用于存储绘制轨迹线所需的顶点数据等信息
+#[derive(Resource)]
+struct TrailMesh {
+    mesh: Mesh,
+    vertex_buffer: Vec<[f32; 3]>,
+    index_buffer: Vec<u32>,
+    vertex_count: usize,
+}
+
+// 创建自定义绘制资源
+fn create_trail_mesh(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+) -> Handle<Mesh> {
+    let mut trail_mesh = TrailMesh {
+        mesh: Mesh::new(PrimitiveTopology::TriangleList,RenderAssetUsages::RENDER_WORLD),
+        vertex_buffer: Vec::new(),
+        index_buffer: Vec::new(),
+        vertex_count: 0,
+    };
+
+    // 创建一个初始的空网格资源，并将其插入到资源管理系统中
+    let mesh_handle = meshes.add(trail_mesh.mesh.clone());
+    commands.insert_resource(trail_mesh);
+    mesh_handle
+}
+fn update_trail_mesh(
+    mut trail_mesh: ResMut<TrailMesh>,
+    trails: Query<&MovementTrail, With<TrailedEntity>>,
+) {
+    trail_mesh.vertex_buffer.clear();
+    trail_mesh.index_buffer.clear();
+    trail_mesh.vertex_count = 0;
+
+    for trail in trails.iter() {
+        let mut prev_index = None;
+        for point in &trail.points {
+            // 将轨迹点的坐标添加到顶点缓冲区
+            trail_mesh.vertex_buffer.push([point.x, point.y, point.z]);
+            let current_index = trail_mesh.vertex_count;
+            trail_mesh.vertex_count += 1;
+
+            if let Some(prev) = prev_index {
+                // 构建索引缓冲区，用于绘制线条（这里简单使用线段连接相邻点）
+                trail_mesh.index_buffer.push(prev);
+                trail_mesh.index_buffer.push(current_index as u32);
+            }
+            prev_index = Some(current_index as u32);
+        }
+    }
+
+    // 更新网格的顶点和索引数据
+    let mut mesh = trail_mesh.mesh.clone();
+    mesh.insert_indices(Indices::U32(trail_mesh.index_buffer.clone()));
+    mesh.insert_attribute(
+        Mesh::ATTRIBUTE_POSITION,
+        trail_mesh.vertex_buffer.as_slice(),
+    );
+    *trail_mesh.mesh = mesh;
+}
+
+fn draw_trails(
+    trail_mesh: Res<TrailMesh>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    mut query: Query<(&Handle<Mesh>, &MovementTrail), With<TrailedEntity>>,
+    mut commands: Commands,
+) {
+    for (mesh_handle, trail) in query.iter_mut() {
+        // 创建一个颜色材质用于绘制轨迹线
+        let material_handle = materials.add(ColorMaterial {
+            color: trail.color,
+            ..default()
+        });
+
+        // 构建透明度相关逻辑，实现淡出效果
+        let mut alpha = 1.0;
+        for (i, _) in trail.points.iter().enumerate() {
+            alpha = 1.0 - (i as f32) * trail.fade_speed;
+            if alpha < 0.0 {
+                alpha = 0.0;
+            }
+
+            // 创建一个新的透明颜色材质，用于当前线段的绘制
+            let transparent_material_handle = materials.add(ColorMaterial {
+                color: Color::rgba(trail.color.r(), trail.color.g(), trail.color.b(), alpha),
+                ..default()
+            });
+
+            // 绘制轨迹线（这里使用线段连接相邻点，逐段绘制以实现淡出效果）
+            if i < trail.points.len() - 1 {
+                commands.spawn((
+                    MaterialMesh2dBundle {
+                        mesh: Mesh2dHandle(mesh_handle.clone()),
+                        material: transparent_material_handle.clone(),
+                        transform: Transform::from_xyz(
+                            0.0,
+                            0.0,
+                            (i as f32) * 0.001, // 可以适当设置不同层级的深度，便于视觉区分
+                        ),
+                        ..default()
+                    },
+                    Visibility::default(),
+                ));
+            }
+        }
+
+        // 在每个轨迹点上绘制亮点（这里简单使用圆形 Sprite 表示亮点）
+        for point in &trail.points {
+            commands.spawn(SpriteBundle {
+                sprite: Sprite {
+                    color: Color::YELLOW,
+                    custom_size: Some(Vec2::new(4.0, 4.0)), // 设置亮点大小
+                    ..default()
+                },
+                transform: Transform::from_xyz(point.x, point.y, 0.0),
+                ..default()
+            });
+        }
+    }
+}
 pub struct PlayerPlugin;
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
