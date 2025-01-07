@@ -389,14 +389,15 @@ pub fn tool_system(
 
 pub fn update_player_sprite(
     mut query: Query<(&mut Transform, &Actor), With<Player>>,
-    mut trail: ResMut<Trail>
+    mut trail: ResMut<Trail>,
+    mut gizmos: Gizmos,
 ) {
     let (mut transform, actor) = query.single_mut();
     let top_corner_vec = vec3(actor.pos.x as f32, -actor.pos.y as f32, 2.);
     let center_vec = top_corner_vec + vec3(actor.width as f32 / 2., -8., 0.);
     transform.translation = center_vec;
-    if let Some(last)=trail.points.pop_back(){
-        if last!=center_vec.xy() {
+    if let Some(last)=trail.points.iter().last(){
+        if *last!=center_vec.xy() {
             trail.add_point(center_vec.xy());
         }
     }else {
@@ -467,7 +468,7 @@ pub struct Inputs {
     numbers: [bool; 4],
 }
 
-#[derive(Resource,Default)]
+#[derive(Resource)]
 struct Trail {
     points: VecDeque<Vec2>,  // 使用 VecDeque 来存储轨迹点
     max_points: usize,        // 最大轨迹点数量
@@ -483,10 +484,12 @@ impl Default for Trail {
 }
 impl Trail {
     fn add_point(&mut self, point: Vec2) {
+        println!("add_point_:{:?}",self.points.len());
         if self.points.len() >= self.max_points {
             self.points.pop_front();  // 删除最老的点
         }
         self.points.push_back(point);  // 添加新点
+        println!("add_point_back:{:?}",self.points.len());
     }
 }
 
@@ -504,23 +507,46 @@ fn render_trail(
             },
             ..Default::default()
         });
-        println!("count_:{:?}_i_{:?}",trail.points.len(),i);
-        if let Some(v)=trail.points.get(min((i+1) as usize,trail.points.len())){
-            println!("v_:{:?}",v);
+    }
+
+}
+
+
+fn cleanup_trail(
+    mut commands: Commands,
+    mut trail_query: Query<(Entity, &Trail)>,
+) {
+    // 如果轨迹点的数量超过最大值，删除最旧的轨迹点
+    let trail_count = trail_query.iter().count();
+    if trail_count > 30 {
+        // 获取最旧的轨迹并删除
+        if let Some((entity, _)) = trail_query.iter().next() {
+            commands.entity(entity).despawn();
+        }
+    }
+
+    // 删除生命周期已结束的轨迹点
+    // for (entity, trail) in trail_query.iter_mut() {
+    //     if trail.lifespan >= trail.max_lifespan {
+    //         commands.entity(entity).despawn();
+    //     }
+    // }
+}
+
+fn ray_cast_system(
+    mut gizmos: Gizmos,
+    trail: Res<Trail>
+) {
+    for (i, point) in trail.points.iter().enumerate() {
+        if let Some(v) = trail.points.get(min((i + 1) as usize, trail.points.len())) {
+            println!("v_:{:?}_point_{:?}", v, point.xy());
             gizmos.line_2d(
                 point.xy(),
                 v.xy(),
                 Color::WHITE,
             );
         }
-
     }
-}
-fn ray_cast_system(
-    mut gizmos: Gizmos,
-    trail: Res<Trail>
-) {
-
 }
 pub struct PlayerPlugin;
 impl Plugin for PlayerPlugin {
@@ -539,9 +565,10 @@ impl Plugin for PlayerPlugin {
                 .run_if(in_state(GameState::Game)),
         )
         .add_systems(
-            PostUpdate,
+            Update,
             ray_cast_system
         )
+        .add_systems(PostUpdate,cleanup_trail)
         .add_systems(PreUpdate, get_input.run_if(in_state(GameState::Game)))
         .init_resource::<SavingTask>()
         .init_resource::<Inputs>()
