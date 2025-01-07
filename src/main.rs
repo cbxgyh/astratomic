@@ -3,6 +3,7 @@
 use bevy::prelude::*;
 use bevy::render::RenderPlugin;
 use bevy::render::settings::{Backends, WgpuSettings};
+use bevy::window::{PresentMode, WindowResolution};
 
 mod actors;
 mod animation;
@@ -72,6 +73,16 @@ fn main() {
                     .into(),
                 ..default()
             })
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: "BevyMark".into(),
+                        resolution: WindowResolution::new(120.0, 80.0)
+                            .with_scale_factor_override(1.0),
+                        present_mode: PresentMode::AutoNoVsync,
+                        ..default()
+                    }),
+                    ..default()
+                })
                 .set(ImagePlugin::default_nearest())
             ,
 

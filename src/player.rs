@@ -1,3 +1,5 @@
+use std::cmp::min;
+use std::collections::VecDeque;
 use bevy::render::mesh::{PrimitiveTopology, VertexAttributeValues};
 use bevy::render::render_asset::RenderAssetUsages;
 use bevy::sprite::Anchor;
@@ -385,16 +387,22 @@ pub fn tool_system(
     }
 }
 
-pub fn update_player_sprite(mut query: Query<(&mut Transform, &Actor), With<Player>>) {
+pub fn update_player_sprite(
+    mut query: Query<(&mut Transform, &Actor), With<Player>>,
+    mut trail: ResMut<Trail>
+) {
     let (mut transform, actor) = query.single_mut();
     let top_corner_vec = vec3(actor.pos.x as f32, -actor.pos.y as f32, 2.);
     let center_vec = top_corner_vec + vec3(actor.width as f32 / 2., -8., 0.);
     transform.translation = center_vec;
-    // Trail {
-    //     position: transform.translation.xy(),
-    //     lifespan: 0.0, // 初始生存时间
-    //     max_lifespan: 5.0, // 设置最大生存时间
-    // };
+    if let Some(last)=trail.points.pop_back(){
+        if last!=center_vec.xy() {
+            trail.add_point(center_vec.xy());
+        }
+    }else {
+        trail.add_point(center_vec.xy());
+    }
+
 }
 
 #[derive(Resource, Default)]
@@ -459,12 +467,61 @@ pub struct Inputs {
     numbers: [bool; 4],
 }
 
-// struct Trail {
-//     position: Vec2,
-//     lifespan: f32,       // 轨迹的生存时间
-//     max_lifespan: f32,   // 最大生存时间
-// }
+#[derive(Resource,Default)]
+struct Trail {
+    points: VecDeque<Vec2>,  // 使用 VecDeque 来存储轨迹点
+    max_points: usize,        // 最大轨迹点数量
+}
 
+impl Default for Trail {
+    fn default() -> Self {
+        Trail {
+            points: VecDeque::default(),  // 使用 VecDeque 来存储轨迹点
+            max_points: 30,        // 最大轨迹点数量
+        }
+    }
+}
+impl Trail {
+    fn add_point(&mut self, point: Vec2) {
+        if self.points.len() >= self.max_points {
+            self.points.pop_front();  // 删除最老的点
+        }
+        self.points.push_back(point);  // 添加新点
+    }
+}
+
+fn render_trail(
+    mut gizmos: Gizmos,
+    trail: Res<Trail>,
+    mut commands: Commands) {
+    // 渲染轨迹点
+    for (i, point) in trail.points.iter().enumerate() {
+        commands.spawn(SpriteBundle {
+            transform: Transform::from_translation(Vec3::new(point.x, point.y, 0.0)),
+            sprite: Sprite {
+                color: Color::RED,  // 可以根据轨迹的老化程度调整颜色
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        println!("count_:{:?}_i_{:?}",trail.points.len(),i);
+        if let Some(v)=trail.points.get(min((i+1) as usize,trail.points.len())){
+            println!("v_:{:?}",v);
+            gizmos.line_2d(
+                point.xy(),
+                v.xy(),
+                Color::WHITE,
+            );
+        }
+
+    }
+}
+fn ray_cast_system(
+    mut gizmos: Gizmos,
+    trail: Res<Trail>
+) {
+
+}
 pub struct PlayerPlugin;
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
@@ -473,6 +530,7 @@ impl Plugin for PlayerPlugin {
             (
                 update_player.before(update_actors),
                 update_player_sprite.after(update_actors),
+                render_trail.after(update_player_sprite),
                 tool_system
                     .before(chunk_manager_update)
                     .before(update_particles),
@@ -480,9 +538,14 @@ impl Plugin for PlayerPlugin {
             )
                 .run_if(in_state(GameState::Game)),
         )
+        .add_systems(
+            PostUpdate,
+            ray_cast_system
+        )
         .add_systems(PreUpdate, get_input.run_if(in_state(GameState::Game)))
         .init_resource::<SavingTask>()
         .init_resource::<Inputs>()
+        .init_resource::<Trail>()
         .add_systems(OnEnter(GameState::Game), player_setup.after(manager_setup));
     }
 }
