@@ -615,11 +615,13 @@ fn clean_line(
     query: Query<(Entity, &FlagLine)>,
     mut trail: ResMut<Trail>,
 ){
+    println!("clean_line_:{:?}",query.iter().len());
     for (e,fline) in query.iter() {
        if trail.remove_points.contains(&fline.points){
             commands.entity(e).despawn();
        }
     }
+    trail.remove_points.clear();
 }
 pub struct PlayerPlugin;
 impl Plugin for PlayerPlugin {
@@ -641,7 +643,7 @@ impl Plugin for PlayerPlugin {
                 Update,
                 ray_cast_system
             )
-            .add_systems(PostUpdate,clean_line)
+            // .add_systems(PostUpdate,clean_line)
             .add_systems(PreUpdate, get_input.run_if(in_state(GameState::Game)))
             .init_resource::<SavingTask>()
             .init_resource::<Inputs>()
