@@ -483,6 +483,7 @@ pub struct Inputs {
 struct Trail {
     points: VecDeque<Vec3>,  // 使用 VecDeque 来存储轨迹点  xy 位置 z 颜色
     max_points: usize,        // 最大轨迹点数量
+    remove_points: VecDeque<Vec3>,
 }
 
 impl Default for Trail {
@@ -490,6 +491,7 @@ impl Default for Trail {
         Trail {
             points: VecDeque::default(),  // 使用 VecDeque 来存储轨迹点
             max_points: 300,        // 最大轨迹点数量
+            remove_points:VecDeque::default()
         }
     }
 }
@@ -497,7 +499,7 @@ impl Trail {
     fn add_point(&mut self, point: Vec3) {
         // println!("add_point_:{:?}",self.points.len());
         if self.points.len() >= self.max_points {
-            self.points.pop_front();  // 删除最老的点
+            self.remove_points.push_back(self.points.pop_front().unwrap());  // 删除最老的点
         }
         self.points.push_back(point);  // 添加新点
         // println!("add_point_back:{:?}",self.points.len());
@@ -560,7 +562,10 @@ fn ray_cast_system(
     // }
 }
 
-struct FlagLine;
+#[derive(Component)]
+struct FlagLine{
+    points: Vec3,
+}
 
 fn f32_color(f:f32) -> Color{
     match f {
@@ -574,7 +579,7 @@ fn f32_color(f:f32) -> Color{
 fn draw_line(
     mut commands: Commands,
     trail: Res<Trail>,
-
+    mut meshes: ResMut<Assets<Mesh>>
 ){
     for (i, point) in trail.points.iter().enumerate() {
         if let Some(v) = trail.points.get(min((i + 1) as usize, trail.points.len())) {
@@ -590,8 +595,30 @@ fn draw_line(
             let mut mesh =  Mesh::new(PrimitiveTopology::LineList,RenderAssetUsages::RENDER_WORLD);
             mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION,vertices);
             mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR,colors);
+            commands.spawn(
+                (
+               PbrBundle {
+                mesh: meshes.add(mesh),
+                ..Default::default()
+            },
+               FlagLine{
+                points:point.xyz()
+               }
 
+            ));
         }
+    }
+}
+
+fn clean_line(
+    mut commands: Commands,
+    query: Query<(Entity, &FlagLine)>,
+    mut trail: ResMut<Trail>,
+){
+    for (e,fline) in query.iter() {
+       if trail.remove_points.contains(&fline.points){
+            commands.entity(e).despawn();
+       }
     }
 }
 pub struct PlayerPlugin;
@@ -602,7 +629,7 @@ impl Plugin for PlayerPlugin {
             (
                 update_player.before(update_actors),
                 update_player_sprite.after(update_actors),
-                render_trail.after(update_player_sprite),
+                draw_line.after(update_player_sprite),
                 tool_system
                     .before(chunk_manager_update)
                     .before(update_particles),
@@ -614,7 +641,7 @@ impl Plugin for PlayerPlugin {
                 Update,
                 ray_cast_system
             )
-            .add_systems(PostUpdate,cleanup_trail)
+            .add_systems(PostUpdate,clean_line)
             .add_systems(PreUpdate, get_input.run_if(in_state(GameState::Game)))
             .init_resource::<SavingTask>()
             .init_resource::<Inputs>()
