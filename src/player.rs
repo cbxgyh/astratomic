@@ -140,7 +140,7 @@ pub fn player_setup(
         mesh: meshes.add(mesh),
         ..Default::default()
     })
-    .insert(PlayerTrail { positions: Vec::new() });
+        .insert(PlayerTrail { positions: Vec::new() });
     ;
 
 }
@@ -165,10 +165,10 @@ pub fn update_player(
     if actor.vel.y < TERM_VEL as f32 {
         actor.vel.y += 1.
             * if matches!(player.state, PlayerState::Jetpack { .. }) {
-                0.4
-            } else {
-                1.
-            };
+            0.4
+        } else {
+            1.
+        };
     }
 
     // Movement
@@ -189,7 +189,10 @@ pub fn update_player(
             player.state = PlayerState::Idle
         }
     }
-
+    // 跳跃按键刚按下时（jump_just_pressed），如果玩家站在地面上（on_ground），就会让玩家跳跃（actor.vel.y -= JUMP_MAG）。
+    // 跳跃状态会被设为 Jumping 并记录跳跃的开始时间。
+    // 在跳跃状态中，如果玩家仍然按着跳跃键（jump_pressed）并且按下的时间小于设定的最大时间（TIME_JUMP_PRESSED），
+    // 则会增加跳跃的高度（actor.vel.y -= PRESSED_JUMP_MAG）。
     // Jump
     if inputs.jump_just_pressed {
         if on_ground {
@@ -388,23 +391,31 @@ pub fn tool_system(
 }
 
 pub fn update_player_sprite(
-    mut query: Query<(&mut Transform, &Actor), With<Player>>,
+    mut query: Query<(&mut Transform, &Actor,&Player)>,
     mut trail: ResMut<Trail>,
-    mut gizmos: Gizmos,
 ) {
-    let (mut transform, actor) = query.single_mut();
+    let (mut transform, actor,player) = query.single_mut();
     let top_corner_vec = vec3(actor.pos.x as f32, -actor.pos.y as f32, 2.);
     let center_vec = top_corner_vec + vec3(actor.width as f32 / 2., -8., 0.);
     transform.translation = center_vec;
+
+    let clo= match player.state {
+        PlayerState::Jumping(_) => 0.9,
+        PlayerState::Jetpack(_) => 0.8,
+        PlayerState::Walking=> 0.7,
+        _=> 1.0
+    };
+
     if let Some(last)=trail.points.iter().last(){
-        if *last!=center_vec.xy() {
-            trail.add_point(center_vec.xy());
+        if last.xy()!=center_vec.xy() {
+            trail.add_point(Vec3::new(center_vec.x,center_vec.y,clo));
         }
     }else {
-        trail.add_point(center_vec.xy());
+        trail.add_point(Vec3::new(center_vec.x,center_vec.y,clo));
     }
 
 }
+
 
 #[derive(Resource, Default)]
 pub struct SavingTask(pub Option<Task<()>>);
@@ -470,7 +481,7 @@ pub struct Inputs {
 
 #[derive(Resource)]
 struct Trail {
-    points: VecDeque<Vec2>,  // 使用 VecDeque 来存储轨迹点
+    points: VecDeque<Vec3>,  // 使用 VecDeque 来存储轨迹点  xy 位置 z 颜色
     max_points: usize,        // 最大轨迹点数量
 }
 
@@ -478,52 +489,51 @@ impl Default for Trail {
     fn default() -> Self {
         Trail {
             points: VecDeque::default(),  // 使用 VecDeque 来存储轨迹点
-            max_points: 30,        // 最大轨迹点数量
+            max_points: 300,        // 最大轨迹点数量
         }
     }
 }
 impl Trail {
-    fn add_point(&mut self, point: Vec2) {
-        println!("add_point_:{:?}",self.points.len());
+    fn add_point(&mut self, point: Vec3) {
+        // println!("add_point_:{:?}",self.points.len());
         if self.points.len() >= self.max_points {
             self.points.pop_front();  // 删除最老的点
         }
         self.points.push_back(point);  // 添加新点
-        println!("add_point_back:{:?}",self.points.len());
+        // println!("add_point_back:{:?}",self.points.len());
     }
 }
 
 fn render_trail(
-    mut gizmos: Gizmos,
     trail: Res<Trail>,
     mut commands: Commands) {
     // 渲染轨迹点
-    for (i, point) in trail.points.iter().enumerate() {
-        commands.spawn(SpriteBundle {
-            transform: Transform::from_translation(Vec3::new(point.x, point.y, 0.0)),
-            sprite: Sprite {
-                color: Color::RED,  // 可以根据轨迹的老化程度调整颜色
-                ..Default::default()
-            },
-            ..Default::default()
-        });
-    }
+    // for (i, point) in trail.points.iter().enumerate() {
+    //     commands.spawn(SpriteBundle {
+    //         transform: Transform::from_translation(Vec3::new(point.x, point.y, 0.0)),
+    //         sprite: Sprite {
+    //             color: Color::RED,  // 可以根据轨迹的老化程度调整颜色
+    //             ..Default::default()
+    //         },
+    //         ..Default::default()
+    //     });
+    // }
 
 }
 
 
 fn cleanup_trail(
     mut commands: Commands,
-    mut trail_query: Query<(Entity, &Trail)>,
+    // mut trail_query: Query<(Entity, &Trail)>,
 ) {
     // 如果轨迹点的数量超过最大值，删除最旧的轨迹点
-    let trail_count = trail_query.iter().count();
-    if trail_count > 30 {
-        // 获取最旧的轨迹并删除
-        if let Some((entity, _)) = trail_query.iter().next() {
-            commands.entity(entity).despawn();
-        }
-    }
+    // let trail_count = trail_query.iter().count();
+    // if trail_count > 30 {
+    //     // 获取最旧的轨迹并删除
+    //     if let Some((entity, _)) = trail_query.iter().next() {
+    //         commands.entity(entity).despawn();
+    //     }
+    // }
 
     // 删除生命周期已结束的轨迹点
     // for (entity, trail) in trail_query.iter_mut() {
@@ -537,14 +547,50 @@ fn ray_cast_system(
     mut gizmos: Gizmos,
     trail: Res<Trail>
 ) {
+    // for (i, point) in trail.points.iter().enumerate() {
+    //     if let Some(v) = trail.points.get(min((i + 1) as usize, trail.points.len())) {
+    //         // println!("v_:{:?}_point_{:?}", i, point.xy());
+    //         gizmos.line_2d(
+    //             point.xy(),
+    //             v.xy(),
+    //             Color::WHITE,
+    //         );
+    //         gizmos.circle(Vec3::new(point.x, point.y, 0.),Direction3d::Z, 0.9, Color::RED);
+    //     }
+    // }
+}
+
+struct FlagLine;
+
+fn f32_color(f:f32) -> Color{
+    match f {
+        0.9=>Color::RED,
+        0.8=>Color::BLUE,
+        0.7=>Color::GREEN,
+        _=>Color::WHITE,
+    }
+}
+
+fn draw_line(
+    mut commands: Commands,
+    trail: Res<Trail>,
+
+){
     for (i, point) in trail.points.iter().enumerate() {
         if let Some(v) = trail.points.get(min((i + 1) as usize, trail.points.len())) {
-            println!("v_:{:?}_point_{:?}", v, point.xy());
-            gizmos.line_2d(
-                point.xy(),
-                v.xy(),
-                Color::WHITE,
-            );
+            let vertices = vec![
+                Vec3::new(point.x, point.y, 0.0), // 起点
+                Vec3::new(v.x, v.y, 0.0), // 终点
+            ];
+            let colors = vec![
+                f32_color(point.z).as_rgba_f32(), // 起点颜色
+                f32_color(v.z).as_rgba_f32(), // 终点颜色
+            ];
+
+            let mut mesh =  Mesh::new(PrimitiveTopology::LineList,RenderAssetUsages::RENDER_WORLD);
+            mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION,vertices);
+            mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR,colors);
+
         }
     }
 }
@@ -564,15 +610,15 @@ impl Plugin for PlayerPlugin {
             )
                 .run_if(in_state(GameState::Game)),
         )
-        .add_systems(
-            Update,
-            ray_cast_system
-        )
-        .add_systems(PostUpdate,cleanup_trail)
-        .add_systems(PreUpdate, get_input.run_if(in_state(GameState::Game)))
-        .init_resource::<SavingTask>()
-        .init_resource::<Inputs>()
-        .init_resource::<Trail>()
-        .add_systems(OnEnter(GameState::Game), player_setup.after(manager_setup));
+            .add_systems(
+                Update,
+                ray_cast_system
+            )
+            .add_systems(PostUpdate,cleanup_trail)
+            .add_systems(PreUpdate, get_input.run_if(in_state(GameState::Game)))
+            .init_resource::<SavingTask>()
+            .init_resource::<Inputs>()
+            .init_resource::<Trail>()
+            .add_systems(OnEnter(GameState::Game), player_setup.after(manager_setup));
     }
 }
