@@ -632,10 +632,12 @@ impl Plugin for PlayerPlugin {
                 update_player.before(update_actors),
                 update_player_sprite.after(update_actors),
                 draw_line.after(update_player_sprite),
+
                 tool_system
                     .before(chunk_manager_update)
                     .before(update_particles),
                 clear_input.after(update_player).after(tool_system),
+                clean_line.after(clear_input)
             )
                 .run_if(in_state(GameState::Game)),
         )
