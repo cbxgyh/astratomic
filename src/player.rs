@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use bevy::render::mesh::{PrimitiveTopology, VertexAttributeValues};
 use bevy::render::render_asset::RenderAssetUsages;
 use bevy::sprite::Anchor;
-
+use geo::point;
 use crate::prelude::*;
 
 #[derive(Component)]
@@ -482,47 +482,152 @@ pub struct Inputs {
 #[derive(Resource)]
 struct Trail {
     points: VecDeque<Vec3>,  // 使用 VecDeque 来存储轨迹点  xy 位置 z 颜色
+    create_points: VecDeque<Vec3>,
+    create_Lines:VecDeque<Vec3>,
     max_points: usize,        // 最大轨迹点数量
-    remove_points: VecDeque<Vec3>,
 }
 
 impl Default for Trail {
     fn default() -> Self {
         Trail {
             points: VecDeque::default(),  // 使用 VecDeque 来存储轨迹点
+            create_points: VecDeque::default(),
+            create_Lines: VecDeque::default(),
             max_points: 300,        // 最大轨迹点数量
-            remove_points:VecDeque::default()
         }
     }
 }
 impl Trail {
     fn add_point(&mut self, point: Vec3) {
         // println!("add_point_:{:?}",self.points.len());
-        if self.points.len() >= self.max_points {
-            self.remove_points.push_back(self.points.pop_front().unwrap());  // 删除最老的点
+        if self.points.len() < self.max_points {
+            // self.remove_points.push_back(self.points.pop_front().unwrap());  // 删除最老的点
+            self.create_points.push_back(point);  // 添加新点
+        }else{
+            self.points.pop_front();
+            self.points.push_back(point);
         }
-        self.points.push_back(point);  // 添加新点
+
         // println!("add_point_back:{:?}",self.points.len());
     }
 }
-
+// #[derive(Component)]
+// struct FlagLine{
+//     // points: Vec3,
+// }
+#[derive(Component)]
+struct FlagLine;
+#[derive(Component)]
+struct FlagPoint;
 fn render_trail(
-    trail: Res<Trail>,
+    mut trail: ResMut<Trail>,
+    mut query_trail:Query<(&mut Transform,&mut Sprite),With<FlagPoint>>,
+    mut meshes: ResMut<Assets<Mesh>>,
     mut commands: Commands) {
+
+    let create_points= &trail.create_points;
+
+    // println!("render_trail:{:?},{:?}",query_trail.iter().len(),trail.points.len());
+
+    let max_points= trail.max_points/2;
     // 渲染轨迹点
-    // for (i, point) in trail.points.iter().enumerate() {
-    //     commands.spawn(SpriteBundle {
-    //         transform: Transform::from_translation(Vec3::new(point.x, point.y, 0.0)),
-    //         sprite: Sprite {
-    //             color: Color::RED,  // 可以根据轨迹的老化程度调整颜色
-    //             ..Default::default()
-    //         },
-    //         ..Default::default()
-    //     });
-    // }
+    for (i, point) in create_points.iter().enumerate() {
+        let a=  if 1>=max_points { 1.0}else{0.3};
+        commands.spawn((
+                           SpriteBundle {
+            transform: Transform::from_translation(Vec3::new(point.x, point.y, 0.0)),
+            sprite: Sprite {
+                color: Color::rgba(1.0, 0.0, 0.0,a),  // 可以根据轨迹的老化程度调整颜色
+                ..Default::default()
+            },
+            ..Default::default()
+        },FlagPoint));
+
+    }
+    // 先把 trail.create_points 的值赋给一个临时变量
+    let mut create_points = std::mem::take(&mut trail.create_points);
+    trail.create_Lines.append(&mut create_points.clone());
+    // 然后对 trail.points 进行操作，使用刚才的临时变量
+    trail.points.append(&mut create_points);
+    // 如果需要，再把修改后的 create_points 赋值回 trail.create_points
+    trail.create_points = create_points;
+
+
+
+    query_trail.iter_mut().enumerate()
+        .zip(trail.points.iter())
+        .for_each(|((i,(mut tr,mut sp)), elem2)|{
+            tr.translation=*elem2;
+            if i>= trail.max_points/2 {
+                sp.color.set_a( 0.3);
+            }
+        });
 
 }
+fn render_trail_line(
+    mut trail: ResMut<Trail>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut commands: Commands,
+    mut query_trail_line:Query<(&mut Transform,&mut Mesh),With<FlagLine>>,
+){
+    let points= &trail.points;
+    println!("render_trail_line:{:?},{:?}",query_trail_line.iter().len(),trail.points.len());
+    //  生成
+    if points.len() < trail.max_points {
+        println!("1_{:?}",trail.create_Lines.len());
+       if trail.create_Lines.len()%2==0{
+           let create_Lines=trail.create_Lines.clone();
+           trail.create_Lines.pop_front();
+           for (i, point) in create_Lines.iter().enumerate() {
 
+               let a=  if 1>=trail.max_points { 1.0}else{0.3};
+               println!("2_:{:?}___{:?}",create_Lines,create_Lines.get(min((i + 1) as usize, create_Lines.len())));
+               if let Some(v) = create_Lines.get(min((i + 1) as usize, create_Lines.len())) {
+                   let vertices = vec![
+                       Vec3::new(point.x, point.y, 0.0), // 起点
+                       Vec3::new(v.x, v.y, 0.0), // 终点
+                   ];
+                   println!("3");
+                   let colors = vec![
+                       f32_color(point.z,a).as_rgba_f32(), // 起点颜色
+                       f32_color(v.z,a).as_rgba_f32(), // 终点颜色
+                   ];
+                   let mut mesh =  Mesh::new(PrimitiveTopology::LineList,RenderAssetUsages::RENDER_WORLD);
+                   mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION,vertices);
+                   mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR,colors);
+                   commands.spawn(
+                       (
+                           PbrBundle {
+                               mesh: meshes.add(mesh),
+                               ..Default::default()
+                           },
+                           FlagLine
+                       ));
+
+               }
+           }
+        }
+    }else {// 更新
+        println!("4_:{:?}",query_trail_line.iter().len());
+        query_trail_line.iter_mut().enumerate()
+            .zip(trail.points.iter())
+            .for_each(|((i,(mut tr,mut mesh)), elem2)|{
+                tr.translation=*elem2;
+                if i>= trail.max_points/2 {
+                    // sp.color.set_a( 0.3);
+                   if let Some(color)=mesh.attribute_mut(Mesh::ATTRIBUTE_COLOR){
+                       if let bevy::render::mesh::VertexAttributeValues::Float32(colors) = color {
+                           for color in colors.iter_mut() {
+                               // 修改颜色的透明度（a通道）
+                               color[3] = 0.3;
+                           }
+                       }
+                   }
+                }
+            });
+    }
+
+}
 
 fn cleanup_trail(
     mut commands: Commands,
@@ -562,66 +667,63 @@ fn ray_cast_system(
     // }
 }
 
-#[derive(Component)]
-struct FlagLine{
-    points: Vec3,
-}
 
-fn f32_color(f:f32) -> Color{
+
+fn f32_color(f:f32,a:f32) -> Color{
     match f {
-        0.9=>Color::RED,
-        0.8=>Color::BLUE,
-        0.7=>Color::GREEN,
-        _=>Color::WHITE,
+        0.9=>Color::rgba(1.0, 0.0, 0.0,a),
+        0.8=>Color::rgba(0.0, 0.0, 1.0,a),
+        0.7=>Color::rgba(0.0, 1.0, 0.0,a),
+        _=>Color::rgba(1.0, 1.0, 1.0,a),
     }
 }
 
-fn draw_line(
-    mut commands: Commands,
-    trail: Res<Trail>,
-    mut meshes: ResMut<Assets<Mesh>>
-){
-    for (i, point) in trail.points.iter().enumerate() {
-        if let Some(v) = trail.points.get(min((i + 1) as usize, trail.points.len())) {
-            let vertices = vec![
-                Vec3::new(point.x, point.y, 0.0), // 起点
-                Vec3::new(v.x, v.y, 0.0), // 终点
-            ];
-            let colors = vec![
-                f32_color(point.z).as_rgba_f32(), // 起点颜色
-                f32_color(v.z).as_rgba_f32(), // 终点颜色
-            ];
-
-            let mut mesh =  Mesh::new(PrimitiveTopology::LineList,RenderAssetUsages::RENDER_WORLD);
-            mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION,vertices);
-            mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR,colors);
-            commands.spawn(
-                (
-               PbrBundle {
-                mesh: meshes.add(mesh),
-                ..Default::default()
-            },
-               FlagLine{
-                points:point.xyz()
-               }
-
-            ));
-        }
-    }
-}
+// fn draw_line(
+//     mut commands: Commands,
+//     trail: Res<Trail>,
+//     mut meshes: ResMut<Assets<Mesh>>
+// ){
+//     for (i, point) in trail.points.iter().enumerate() {
+//         if let Some(v) = trail.points.get(min((i + 1) as usize, trail.points.len())) {
+//             let vertices = vec![
+//                 Vec3::new(point.x, point.y, 0.0), // 起点
+//                 Vec3::new(v.x, v.y, 0.0), // 终点
+//             ];
+//             let colors = vec![
+//                 f32_color(point.z).as_rgba_f32(), // 起点颜色
+//                 f32_color(v.z).as_rgba_f32(), // 终点颜色
+//             ];
+//
+//             let mut mesh =  Mesh::new(PrimitiveTopology::LineList,RenderAssetUsages::RENDER_WORLD);
+//             mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION,vertices);
+//             mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR,colors);
+//             commands.spawn(
+//                 (
+//                PbrBundle {
+//                 mesh: meshes.add(mesh),
+//                 ..Default::default()
+//             },
+//                FlagLine{
+//                 points:point.xyz()
+//                }
+//
+//             ));
+//         }
+//     }
+// }
 
 fn clean_line(
     mut commands: Commands,
     query: Query<(Entity, &FlagLine)>,
     mut trail: ResMut<Trail>,
 ){
-    println!("clean_line_:{:?}",query.iter().len());
-    for (e,fline) in query.iter() {
-       if trail.remove_points.contains(&fline.points){
-            commands.entity(e).despawn();
-       }
-    }
-    trail.remove_points.clear();
+    // println!("clean_line_:{:?}",query.iter().len());
+    // for (e,fline) in query.iter() {
+    //    if trail.remove_points.contains(&fline.points){
+    //         commands.entity(e).despawn();
+    //    }
+    // }
+    // trail.remove_points.clear();
 }
 pub struct PlayerPlugin;
 impl Plugin for PlayerPlugin {
@@ -631,8 +733,8 @@ impl Plugin for PlayerPlugin {
             (
                 update_player.before(update_actors),
                 update_player_sprite.after(update_actors),
-                draw_line.after(update_player_sprite),
-
+                render_trail.after(update_player_sprite),
+                render_trail_line.after(render_trail),
                 tool_system
                     .before(chunk_manager_update)
                     .before(update_particles),
