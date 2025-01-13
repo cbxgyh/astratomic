@@ -534,14 +534,14 @@ fn render_trail(
     for (i, point) in create_points.iter().enumerate() {
         let a=  if 1>=max_points { 1.0}else{0.3};
         commands.spawn((
-                           SpriteBundle {
-            transform: Transform::from_translation(Vec3::new(point.x, point.y, 0.0)),
-            sprite: Sprite {
-                color: Color::rgba(1.0, 0.0, 0.0,a),  // 可以根据轨迹的老化程度调整颜色
+            SpriteBundle {
+                transform: Transform::from_translation(Vec3::new(point.x, point.y, 0.0)),
+                sprite: Sprite {
+                    color: Color::rgba(1.0, 0.0, 0.0,a),  // 可以根据轨迹的老化程度调整颜色
+                    ..Default::default()
+                },
                 ..Default::default()
-            },
-            ..Default::default()
-        },FlagPoint));
+            },FlagPoint));
 
     }
     // 先把 trail.create_points 的值赋给一个临时变量
@@ -568,44 +568,45 @@ fn render_trail_line(
     mut trail: ResMut<Trail>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut commands: Commands,
-    mut query_trail_line:Query<(&mut Transform,&mut Mesh),With<FlagLine>>,
+    mut query_trail_line:Query<(&mut Transform,&mut Handle<Mesh>),With<FlagLine>>,
 ){
     let points= &trail.points;
     println!("render_trail_line:{:?},{:?}",query_trail_line.iter().len(),trail.points.len());
     //  生成
     if points.len() < trail.max_points {
         println!("1_{:?}",trail.create_Lines.len());
-       if trail.create_Lines.len()%2==0{
-           let create_Lines=trail.create_Lines.clone();
-           trail.create_Lines.pop_front();
-           for (i, point) in create_Lines.iter().enumerate() {
+        if trail.create_Lines.len()%2==0{
+            let create_Lines=trail.create_Lines.clone();
+            trail.create_Lines.pop_front();
+            for (i, point) in create_Lines.iter().enumerate() {
 
-               let a=  if 1>=trail.max_points { 1.0}else{0.3};
-               println!("2_:{:?}___{:?}",create_Lines,create_Lines.get(min((i + 1) as usize, create_Lines.len())));
-               if let Some(v) = create_Lines.get(min((i + 1) as usize, create_Lines.len())) {
-                   let vertices = vec![
-                       Vec3::new(point.x, point.y, 0.0), // 起点
-                       Vec3::new(v.x, v.y, 0.0), // 终点
-                   ];
-                   println!("3");
-                   let colors = vec![
-                       f32_color(point.z,a).as_rgba_f32(), // 起点颜色
-                       f32_color(v.z,a).as_rgba_f32(), // 终点颜色
-                   ];
-                   let mut mesh =  Mesh::new(PrimitiveTopology::LineList,RenderAssetUsages::RENDER_WORLD);
-                   mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION,vertices);
-                   mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR,colors);
-                   commands.spawn(
-                       (
-                           PbrBundle {
-                               mesh: meshes.add(mesh),
-                               ..Default::default()
-                           },
-                           FlagLine
-                       ));
+                let a=  if 1>=trail.max_points { 1.0}else{0.3};
+                println!("2_:{:?}___{:?}",create_Lines,create_Lines.get(min((i + 1) as usize, create_Lines.len())));
+                if let Some(v) = create_Lines.get(min((i + 1) as usize, create_Lines.len())) {
+                    let vertices = vec![
+                        Vec3::new(point.x, point.y, 0.0), // 起点
+                        Vec3::new(v.x, v.y, 0.0), // 终点
+                    ];
+                    println!("3");
+                    let colors = vec![
+                        f32_color(point.z,a).as_rgba_f32(), // 起点颜色
+                        f32_color(v.z,a).as_rgba_f32(), // 终点颜色
+                    ];
+                    let mut mesh =  Mesh::new(PrimitiveTopology::LineList,RenderAssetUsages::RENDER_WORLD);
+                    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION,vertices);
+                    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR,colors);
+                    commands.spawn(
+                        (
+                            PbrBundle {
+                                mesh: meshes.add(mesh),
+                                transform:Transform::from_xyz(point.x, point.y, 0.0),
+                                ..Default::default()
+                            },
+                            FlagLine
+                        ));
 
-               }
-           }
+                }
+            }
         }
     }else {// 更新
         println!("4_:{:?}",query_trail_line.iter().len());
@@ -615,14 +616,18 @@ fn render_trail_line(
                 tr.translation=*elem2;
                 if i>= trail.max_points/2 {
                     // sp.color.set_a( 0.3);
-                   if let Some(color)=mesh.attribute_mut(Mesh::ATTRIBUTE_COLOR){
-                       if let bevy::render::mesh::VertexAttributeValues::Float32(colors) = color {
-                           for color in colors.iter_mut() {
-                               // 修改颜色的透明度（a通道）
-                               color[3] = 0.3;
-                           }
-                       }
-                   }
+                    if let Some(mut me)=meshes.get_mut(mesh.id()){
+                        if let Some(color)=me.attribute_mut(Mesh::ATTRIBUTE_COLOR){
+                            if let bevy::render::mesh::VertexAttributeValues::Float32(colors) = color {
+                                // for color in colors.iter_mut(). {
+                                //     // 修改颜色的透明度（a通道）
+                                //     color[3] = 0.3;
+                                // }
+                                println!("render_trail_linerender_trail_line_:{:?}",colors);
+                            }
+                        }
+                    }
+
                 }
             });
     }
