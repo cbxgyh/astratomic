@@ -1,9 +1,10 @@
 use std::cmp::min;
 use std::collections::VecDeque;
-use bevy::render::mesh::{PrimitiveTopology, VertexAttributeValues};
+use bevy::pbr::{MaterialPipeline, MaterialPipelineKey,Material};
+use bevy::render::mesh::{MeshVertexBufferLayout, PrimitiveTopology, VertexAttributeValues};
 use bevy::render::render_asset::RenderAssetUsages;
-use bevy::sprite::Anchor;
-use geo::point;
+use bevy::render::render_resource::{AsBindGroup, PolygonMode, RenderPipelineDescriptor, ShaderRef, SpecializedMeshPipelineError};
+use bevy::sprite::{Anchor, MaterialMesh2dBundle};
 use crate::prelude::*;
 
 #[derive(Component)]
@@ -587,7 +588,7 @@ fn render_trail_line(
                         Vec3::new(point.x, point.y, 0.0), // 起点
                         Vec3::new(v.x, v.y, 0.0), // 终点
                     ];
-                    println!("3");
+                    println!("3_");
                     let colors = vec![
                         f32_color(point.z,a).as_rgba_f32(), // 起点颜色
                         f32_color(v.z,a).as_rgba_f32(), // 终点颜色
@@ -597,11 +598,24 @@ fn render_trail_line(
                     mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR,colors);
                     commands.spawn(
                         (
-                            PbrBundle {
-                                mesh: meshes.add(mesh),
-                                transform:Transform::from_xyz(point.x, point.y, 0.0),
-                                ..Default::default()
-                            },
+                            // PbrBundle {
+                            //     mesh: meshes.add(mesh),
+                            //     transform:Transform::from_xyz(point.x, point.y, 0.0),
+                            //     ..Default::default()
+                            // },
+                            MaterialMesh2dBundle {
+                                mesh: meshes.add(LineStrip {
+                                    points: vec![
+                                        Vec3::ZERO,
+                                        Vec3::new(1.0, 1.0, 0.0),
+                                        Vec3::new(1.0, 0.0, 0.0),
+                                    ],
+                                }).into(),
+                                // 4. Put something bright in a dark environment to see the effect
+                                material: materials.add(Color::rgb(7.5, 0.0, 7.5)),
+                                transform: Transform::from_translation(Vec3::new(-200., 0., 0.)),
+                                ..default()
+                            }
                             FlagLine
                         ));
 
@@ -730,10 +744,73 @@ fn clean_line(
     // }
     // trail.remove_points.clear();
 }
+
+#[derive(Asset, TypePath, Default, AsBindGroup, Debug, Clone)]
+struct LineMaterial {
+    #[uniform(0)]
+    color: Color,
+}
+
+impl Material for LineMaterial {
+    fn fragment_shader() -> ShaderRef {
+        "line_material.wgsl".into()
+    }
+
+    fn specialize(
+        _pipeline: &MaterialPipeline<Self>,
+        descriptor: &mut RenderPipelineDescriptor,
+        _layout: &MeshVertexBufferLayout,
+        _key: MaterialPipelineKey<Self>,
+    ) -> Result<(), SpecializedMeshPipelineError> {
+        // This is the important part to tell bevy to render this material as a line between vertices
+        descriptor.primitive.polygon_mode = PolygonMode::Line;
+        Ok(())
+    }
+}
+#[derive(Debug, Clone)]
+struct LineList {
+    lines: VecDeque<(Vec3, Vec3)>,
+}
+
+impl From<LineList> for Mesh {
+    fn from(line: LineList) -> Self {
+        let vertices: Vec<_> = line.lines.into_iter().flat_map(|(a, b)| [a, b]).collect();
+
+        Mesh::new(
+            // This tells wgpu that the positions are list of lines
+            // where every pair is a start and end point
+            PrimitiveTopology::LineList,
+            RenderAssetUsages::RENDER_WORLD,
+        )
+            // Add the vertices positions as an attribute
+            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, vertices)
+    }
+}
+#[derive(Debug, Clone)]
+struct LineStrip {
+    points: Vec<Vec3>,
+}
+
+impl From<LineStrip> for Mesh {
+    fn from(line: LineStrip) -> Self {
+        Mesh::new(
+            // This tells wgpu that the positions are a list of points
+            // where a line will be drawn between each consecutive point
+            PrimitiveTopology::LineStrip,
+            RenderAssetUsages::RENDER_WORLD,
+        )
+            // Add the point positions as an attribute
+            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, line.points)
+    }
+}
+
+
 pub struct PlayerPlugin;
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
+
+        app .add_plugins( MaterialPlugin::<LineMaterial>::default())
+            .add_systems(
             FixedUpdate,
             (
                 update_player.before(update_actors),
@@ -757,6 +834,7 @@ impl Plugin for PlayerPlugin {
             .init_resource::<SavingTask>()
             .init_resource::<Inputs>()
             .init_resource::<Trail>()
+
             .add_systems(OnEnter(GameState::Game), player_setup.after(manager_setup));
     }
 }
