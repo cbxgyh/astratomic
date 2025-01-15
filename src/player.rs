@@ -4,7 +4,7 @@ use bevy::pbr::{MaterialPipeline, MaterialPipelineKey,Material};
 use bevy::render::mesh::{MeshVertexBufferLayout, PrimitiveTopology, VertexAttributeValues};
 use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::render_resource::{AsBindGroup, PolygonMode, RenderPipelineDescriptor, ShaderRef, SpecializedMeshPipelineError};
-use bevy::sprite::{Anchor, MaterialMesh2dBundle};
+use bevy::sprite::{Anchor, Material2d, Material2dKey, Material2dPlugin, MaterialMesh2dBundle, Mesh2dHandle};
 use crate::prelude::*;
 
 #[derive(Component)]
@@ -49,6 +49,8 @@ pub struct ToolFront;
 
 pub fn player_setup(
     mut commands: Commands,
+    mut trail: ResMut<Trail>,
+    mut materials: ResMut<Assets<LineMaterial>>,
     asset_server: Res<AssetServer>,
     mut texture_atlases: ResMut<Assets<TextureAtlasLayout>>,
     mut meshes: ResMut<Assets<Mesh>>
@@ -143,7 +145,29 @@ pub fn player_setup(
     })
         .insert(PlayerTrail { positions: Vec::new() });
     ;
+    println!("player_setup");
 
+    {// 更新
+        println!("生成line");
+        let z= LineStrip {
+            points: trail.create_Lines.iter().map(|pos|pos.xy()).collect()
+        };
+        let n: Mesh2dHandle = meshes.add(z).into();
+        let entity= commands.spawn(
+            MaterialMesh2dBundle {
+                mesh: n,
+                material: materials.add(LineMaterial{
+                    color:Color::WHITE
+                }),
+                transform: Transform::from_translation(Vec3::new(-200., 0., 0.)),
+                ..default()
+            },
+
+        ).id();
+        commands.entity(entity).insert(crate::player::FlagLine{
+            entity: Some(entity),
+        });
+    }
 }
 #[derive(Component)]
 struct PlayerTrail {
@@ -517,7 +541,9 @@ impl Trail {
 //     // points: Vec3,
 // }
 #[derive(Component)]
-struct FlagLine;
+struct FlagLine{
+    entity: Option<Entity>,
+}
 #[derive(Component)]
 struct FlagPoint;
 fn render_trail(
@@ -567,124 +593,47 @@ fn render_trail(
 }
 fn render_trail_line(
     mut trail: ResMut<Trail>,
+    mut materials: ResMut<Assets<LineMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut commands: Commands,
-    mut query_trail_line:Query<(&mut Transform,&mut Handle<Mesh>),With<FlagLine>>,
+    mut query_trail_line:Query<(&mut Transform,&FlagLine)>,
 ){
     let points= &trail.points;
-    println!("render_trail_line:{:?},{:?}",query_trail_line.iter().len(),trail.points.len());
     //  生成
-    if points.len() < trail.max_points {
-        println!("1_{:?}",trail.create_Lines.len());
-        if trail.create_Lines.len()%2==0{
-            let create_Lines=trail.create_Lines.clone();
-            trail.create_Lines.pop_front();
-            for (i, point) in create_Lines.iter().enumerate() {
+    for  (mut tr,fl) in query_trail_line.iter_mut(){
 
-                let a=  if 1>=trail.max_points { 1.0}else{0.3};
-                println!("2_:{:?}___{:?}",create_Lines,create_Lines.get(min((i + 1) as usize, create_Lines.len())));
-                if let Some(v) = create_Lines.get(min((i + 1) as usize, create_Lines.len())) {
-                    let vertices = vec![
-                        Vec3::new(point.x, point.y, 0.0), // 起点
-                        Vec3::new(v.x, v.y, 0.0), // 终点
-                    ];
-                    println!("3_");
-                    let colors = vec![
-                        f32_color(point.z,a).as_rgba_f32(), // 起点颜色
-                        f32_color(v.z,a).as_rgba_f32(), // 终点颜色
-                    ];
-                    let mut mesh =  Mesh::new(PrimitiveTopology::LineList,RenderAssetUsages::RENDER_WORLD);
-                    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION,vertices);
-                    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR,colors);
-                    commands.spawn(
-                        (
-                            // PbrBundle {
-                            //     mesh: meshes.add(mesh),
-                            //     transform:Transform::from_xyz(point.x, point.y, 0.0),
-                            //     ..Default::default()
-                            // },
-                            MaterialMesh2dBundle {
-                                mesh: meshes.add(LineStrip {
-                                    points: vec![
-                                        Vec3::ZERO,
-                                        Vec3::new(1.0, 1.0, 0.0),
-                                        Vec3::new(1.0, 0.0, 0.0),
-                                    ],
-                                }).into(),
-                                // 4. Put something bright in a dark environment to see the effect
-                                material: materials.add(Color::rgb(7.5, 0.0, 7.5)),
-                                transform: Transform::from_translation(Vec3::new(-200., 0., 0.)),
-                                ..default()
-                            }
-                            FlagLine
-                        ));
-
-                }
-            }
-        }
-    }else {// 更新
-        println!("4_:{:?}",query_trail_line.iter().len());
-        query_trail_line.iter_mut().enumerate()
-            .zip(trail.points.iter())
-            .for_each(|((i,(mut tr,mut mesh)), elem2)|{
-                tr.translation=*elem2;
-                if i>= trail.max_points/2 {
-                    // sp.color.set_a( 0.3);
-                    if let Some(mut me)=meshes.get_mut(mesh.id()){
-                        if let Some(color)=me.attribute_mut(Mesh::ATTRIBUTE_COLOR){
-                            if let bevy::render::mesh::VertexAttributeValues::Float32(colors) = color {
-                                // for color in colors.iter_mut(). {
-                                //     // 修改颜色的透明度（a通道）
-                                //     color[3] = 0.3;
-                                // }
-                                println!("render_trail_linerender_trail_line_:{:?}",colors);
-                            }
-                        }
+        if let Some(e)=fl.entity{
+            let x=if trail.points.len() == trail.max_points{
+                trail.create_Lines.clone()
+            }else {
+                trail.points.clone()
+            };
+            let z= LineStrip {
+                points: x.iter().map(|pos|pos.xy()).collect(),
+            };
+            let n: Mesh2dHandle = meshes.add(z).into();
+            commands.entity(e).despawn();
+            let eid=commands.spawn(
+                    MaterialMesh2dBundle {
+                        mesh: n,
+                        material: materials.add(LineMaterial{
+                            color:Color::WHITE
+                        }),
+                        transform: Transform::from_translation(Vec3::new(-200., 0., 0.)),
+                        ..default()
                     }
+                ).id();
+            commands.entity(eid).insert(FlagLine{entity:Some(eid)});
+        }
 
-                }
-            });
+
     }
 
+
+
 }
 
-fn cleanup_trail(
-    mut commands: Commands,
-    // mut trail_query: Query<(Entity, &Trail)>,
-) {
-    // 如果轨迹点的数量超过最大值，删除最旧的轨迹点
-    // let trail_count = trail_query.iter().count();
-    // if trail_count > 30 {
-    //     // 获取最旧的轨迹并删除
-    //     if let Some((entity, _)) = trail_query.iter().next() {
-    //         commands.entity(entity).despawn();
-    //     }
-    // }
 
-    // 删除生命周期已结束的轨迹点
-    // for (entity, trail) in trail_query.iter_mut() {
-    //     if trail.lifespan >= trail.max_lifespan {
-    //         commands.entity(entity).despawn();
-    //     }
-    // }
-}
-
-fn ray_cast_system(
-    mut gizmos: Gizmos,
-    trail: Res<Trail>
-) {
-    // for (i, point) in trail.points.iter().enumerate() {
-    //     if let Some(v) = trail.points.get(min((i + 1) as usize, trail.points.len())) {
-    //         // println!("v_:{:?}_point_{:?}", i, point.xy());
-    //         gizmos.line_2d(
-    //             point.xy(),
-    //             v.xy(),
-    //             Color::WHITE,
-    //         );
-    //         gizmos.circle(Vec3::new(point.x, point.y, 0.),Direction3d::Z, 0.9, Color::RED);
-    //     }
-    // }
-}
 
 
 
@@ -697,53 +646,6 @@ fn f32_color(f:f32,a:f32) -> Color{
     }
 }
 
-// fn draw_line(
-//     mut commands: Commands,
-//     trail: Res<Trail>,
-//     mut meshes: ResMut<Assets<Mesh>>
-// ){
-//     for (i, point) in trail.points.iter().enumerate() {
-//         if let Some(v) = trail.points.get(min((i + 1) as usize, trail.points.len())) {
-//             let vertices = vec![
-//                 Vec3::new(point.x, point.y, 0.0), // 起点
-//                 Vec3::new(v.x, v.y, 0.0), // 终点
-//             ];
-//             let colors = vec![
-//                 f32_color(point.z).as_rgba_f32(), // 起点颜色
-//                 f32_color(v.z).as_rgba_f32(), // 终点颜色
-//             ];
-//
-//             let mut mesh =  Mesh::new(PrimitiveTopology::LineList,RenderAssetUsages::RENDER_WORLD);
-//             mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION,vertices);
-//             mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR,colors);
-//             commands.spawn(
-//                 (
-//                PbrBundle {
-//                 mesh: meshes.add(mesh),
-//                 ..Default::default()
-//             },
-//                FlagLine{
-//                 points:point.xyz()
-//                }
-//
-//             ));
-//         }
-//     }
-// }
-
-fn clean_line(
-    mut commands: Commands,
-    query: Query<(Entity, &FlagLine)>,
-    mut trail: ResMut<Trail>,
-){
-    // println!("clean_line_:{:?}",query.iter().len());
-    // for (e,fline) in query.iter() {
-    //    if trail.remove_points.contains(&fline.points){
-    //         commands.entity(e).despawn();
-    //    }
-    // }
-    // trail.remove_points.clear();
-}
 
 #[derive(Asset, TypePath, Default, AsBindGroup, Debug, Clone)]
 struct LineMaterial {
@@ -751,16 +653,15 @@ struct LineMaterial {
     color: Color,
 }
 
-impl Material for LineMaterial {
+impl Material2d for LineMaterial {
     fn fragment_shader() -> ShaderRef {
         "line_material.wgsl".into()
     }
 
     fn specialize(
-        _pipeline: &MaterialPipeline<Self>,
         descriptor: &mut RenderPipelineDescriptor,
-        _layout: &MeshVertexBufferLayout,
-        _key: MaterialPipelineKey<Self>,
+        layout: &MeshVertexBufferLayout,
+        key: Material2dKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
         // This is the important part to tell bevy to render this material as a line between vertices
         descriptor.primitive.polygon_mode = PolygonMode::Line;
@@ -769,12 +670,12 @@ impl Material for LineMaterial {
 }
 #[derive(Debug, Clone)]
 struct LineList {
-    lines: VecDeque<(Vec3, Vec3)>,
+    lines: VecDeque<(Vec2, Vec2)>,
 }
 
 impl From<LineList> for Mesh {
     fn from(line: LineList) -> Self {
-        let vertices: Vec<_> = line.lines.into_iter().flat_map(|(a, b)| [a, b]).collect();
+        let vertices: Vec<_> = line.lines.into_iter().flat_map(|(a, b)| [a.extend(0.), b.extend(0.)]).collect();
 
         Mesh::new(
             // This tells wgpu that the positions are list of lines
@@ -788,11 +689,14 @@ impl From<LineList> for Mesh {
 }
 #[derive(Debug, Clone)]
 struct LineStrip {
-    points: Vec<Vec3>,
+    points: Vec<Vec2>,
 }
 
 impl From<LineStrip> for Mesh {
     fn from(line: LineStrip) -> Self {
+        let x:Vec<Vec3>=line.points.into_iter()
+            .map(|vec2| Vec3::new(vec2.x, vec2.y, 0.0)) // 这里将 z 设置为 0.0
+            .collect();
         Mesh::new(
             // This tells wgpu that the positions are a list of points
             // where a line will be drawn between each consecutive point
@@ -800,7 +704,7 @@ impl From<LineStrip> for Mesh {
             RenderAssetUsages::RENDER_WORLD,
         )
             // Add the point positions as an attribute
-            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, line.points)
+            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, x)
     }
 }
 
@@ -809,7 +713,7 @@ pub struct PlayerPlugin;
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
 
-        app .add_plugins( MaterialPlugin::<LineMaterial>::default())
+        app
             .add_systems(
             FixedUpdate,
             (
@@ -821,20 +725,20 @@ impl Plugin for PlayerPlugin {
                     .before(chunk_manager_update)
                     .before(update_particles),
                 clear_input.after(update_player).after(tool_system),
-                clean_line.after(clear_input)
+
             )
                 .run_if(in_state(GameState::Game)),
         )
-            .add_systems(
-                Update,
-                ray_cast_system
-            )
+            // .add_systems(
+            //     Update,
+            //     ray_cast_system
+            // )
             // .add_systems(PostUpdate,clean_line)
             .add_systems(PreUpdate, get_input.run_if(in_state(GameState::Game)))
             .init_resource::<SavingTask>()
             .init_resource::<Inputs>()
             .init_resource::<Trail>()
-
+            .add_plugins(( Material2dPlugin::<LineMaterial>::default()))
             .add_systems(OnEnter(GameState::Game), player_setup.after(manager_setup));
     }
 }
