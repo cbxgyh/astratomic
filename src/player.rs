@@ -536,10 +536,6 @@ impl Trail {
         // println!("add_point_back:{:?}",self.points.len());
     }
 }
-// #[derive(Component)]
-// struct FlagLine{
-//     // points: Vec3,
-// }
 #[derive(Component)]
 struct FlagLine{
     entity: Option<Entity>,
@@ -549,12 +545,8 @@ struct FlagPoint;
 fn render_trail(
     mut trail: ResMut<Trail>,
     mut query_trail:Query<(&mut Transform,&mut Sprite),With<FlagPoint>>,
-    mut meshes: ResMut<Assets<Mesh>>,
     mut commands: Commands) {
-
     let create_points= &trail.create_points;
-
-    // println!("render_trail:{:?},{:?}",query_trail.iter().len(),trail.points.len());
 
     let max_points= trail.max_points/2;
     // 渲染轨迹点
@@ -579,14 +571,14 @@ fn render_trail(
     // 如果需要，再把修改后的 create_points 赋值回 trail.create_points
     trail.create_points = create_points;
 
-
-
     query_trail.iter_mut().enumerate()
         .zip(trail.points.iter())
         .for_each(|((i,(mut tr,mut sp)), elem2)|{
             tr.translation=*elem2;
             if i>= trail.max_points/2 {
                 sp.color.set_a( 0.3);
+            }else{
+                sp.color.set_a( 1.0);
             }
         });
 
@@ -595,18 +587,20 @@ fn render_trail_line(
     mut trail: ResMut<Trail>,
     mut materials: ResMut<Assets<LineMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
+    query_player: Query<(&Transform),With<Player>>,
     mut commands: Commands,
-    mut query_trail_line:Query<(&mut Transform,&FlagLine)>,
+    mut query_trail_line:Query<(&mut Transform,&FlagLine),Without<Player>>,
 ){
-    let points= &trail.points;
-    //  生成
-    for  (mut tr,fl) in query_trail_line.iter_mut(){
 
+    //  生成
+    println!("render_trail_line_:{:?},____{:?}",query_trail_line.iter().len(),trail.points.len());
+    for  (mut tr,fl) in query_trail_line.iter_mut(){
+        let player_tr=query_player.get_single().unwrap();
         if let Some(e)=fl.entity{
             let x=if trail.points.len() == trail.max_points{
-                trail.create_Lines.clone()
-            }else {
                 trail.points.clone()
+            }else {
+                trail.create_Lines.clone()
             };
             let z= LineStrip {
                 points: x.iter().map(|pos|pos.xy()).collect(),
@@ -619,18 +613,13 @@ fn render_trail_line(
                         material: materials.add(LineMaterial{
                             color:Color::WHITE
                         }),
-                        transform: Transform::from_translation(Vec3::new(-200., 0., 0.)),
+                        transform: Transform::from_translation(player_tr.translation.xyz()),
                         ..default()
                     }
                 ).id();
             commands.entity(eid).insert(FlagLine{entity:Some(eid)});
         }
-
-
     }
-
-
-
 }
 
 
